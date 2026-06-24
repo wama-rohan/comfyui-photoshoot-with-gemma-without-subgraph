@@ -6,7 +6,9 @@ FROM runpod/worker-comfyui:5.8.4-base
 ARG HF_TOKEN=""
 
 # install custom nodes into comfyui
-RUN comfy node install --exit-on-fail lanpaint@1.4.10 --mode remote || (echo "WARN: lanpaint@1.4.10 unavailable in registry, falling back to latest" >&2 && comfy node install --exit-on-fail lanpaint --mode remote)
+# Clones directly from the original LanPaint repository
+RUN git clone https://github.com/scraed/LanPaint /comfyui/custom_nodes/LanPaint
+
 RUN git clone https://github.com/chrisgoringe/cg-use-everywhere /comfyui/custom_nodes/cg-use-everywhere && cd /comfyui/custom_nodes/cg-use-everywhere && (git checkout f72d23a7060db657a2775c4dd1f1a85a3efcf5a8 2>/dev/null || (git fetch origin f72d23a7060db657a2775c4dd1f1a85a3efcf5a8 --depth=1 && git checkout f72d23a7060db657a2775c4dd1f1a85a3efcf5a8) || echo "WARN: commit f72d23a7060db657a2775c4dd1f1a85a3efcf5a8 unreachable in https://github.com/chrisgoringe/cg-use-everywhere, falling back to default branch HEAD")
 RUN comfy node install --exit-on-fail rgthree-comfy@1.0.2512112053 || (echo "WARN: rgthree-comfy@1.0.2512112053 unavailable in registry, falling back to latest" >&2 && comfy node install --exit-on-fail rgthree-comfy)
 
@@ -16,12 +18,22 @@ RUN BACKOFFS="10 20 30 60 90" && for i in 1 2 3 4 5; do HF_TOKEN=$HF_TOKEN comfy
 RUN BACKOFFS="10 20 30 60 90" && for i in 1 2 3 4 5; do HF_TOKEN=$HF_TOKEN comfy model download --url 'https://huggingface.co/YuCollection/FLUX.2-klein-4B-bf16/resolve/main/flux-2-klein-4b.safetensors' --relative-path models/diffusion_models --filename 'flux-2-klein-4b-bf16.safetensors' && break; if [ $i -eq 5 ]; then echo "model-download failed after 5 attempts" >&2; exit 1; fi; SLEEP=$(echo $BACKOFFS | cut -d ' ' -f $i) && echo "model-download attempt $i failed; retrying in $SLEEP seconds" >&2; sleep $SLEEP; done
 RUN BACKOFFS="10 20 30 60 90" && for i in 1 2 3 4 5; do HF_TOKEN=$HF_TOKEN comfy model download --url 'https://huggingface.co/Comfy-Org/gemma-4/resolve/main/text_encoders/gemma4_e4b_it_fp8_scaled.safetensors' --relative-path models/text_encoders --filename 'gemma4_e4b_it_fp8_scaled.safetensors' && break; if [ $i -eq 5 ]; then echo "model-download failed after 5 attempts" >&2; exit 1; fi; SLEEP=$(echo $BACKOFFS | cut -d ' ' -f $i) && echo "model-download attempt $i failed; retrying in $SLEEP seconds" >&2; sleep $SLEEP; done
 
-# copy all input data (like images or videos) into comfyui (uncomment and adjust if needed)
-# COPY input/ /comfyui/input/
+# Ensure the input directory exists before downloading
+RUN mkdir -p /comfyui/input/
 
 # user-provided inputs override the auto-generated placeholders above.
-RUN wget --progress=dot:giga -O '/comfyui/input/pexels-peterfazekas-1137340.jpg' "https://cool-anteater-319.convex.cloud/api/storage/32083710-e5b3-4cbb-8e3c-b9b64ab712af"
-RUN wget --progress=dot:giga -O '/comfyui/input/indian_ethnic_wear_male1.webp' "https://cool-anteater-319.convex.cloud/api/storage/6757a4d2-368e-4231-b959-d012aec684c4"
-RUN wget --progress=dot:giga -O '/comfyui/input/pexels-alina-zahorulko-48514961-31445409.jpg' "https://cool-anteater-319.convex.cloud/api/storage/3b254998-40ca-4ad3-87a9-1d3c9fe699d3"
-RUN wget --progress=dot:giga -O '/comfyui/input/Indian_male_model_1.png' "https://cool-anteater-319.convex.cloud/api/storage/bba9faf9-dab0-4cb1-8d3e-db9081ed0275"
-RUN wget --progress=dot:giga -O '/comfyui/input/pexels-mimfathi-10919291.jpg' "https://cool-anteater-319.convex.cloud/api/storage/9353f9cb-c13a-40f4-8124-0d892caa06d5"
+RUN wget --progress=dot:giga -O '/comfyui/input/pexels-peterfazekas-1137340.jpg' "https://cool-anteater-319.convex.cloud/api/storage/0bebf7c1-c4e5-4a10-99df-1fd907a7fd66"
+RUN wget --progress=dot:giga -O '/comfyui/input/indian_ethnic_wear_male1.webp' "https://cool-anteater-319.convex.cloud/api/storage/3ea1a62c-ef21-443c-961b-9956110f7b69"
+RUN wget --progress=dot:giga -O '/comfyui/input/pexels-alina-zahorulko-48514961-31445409.jpg' "https://cool-anteater-319.convex.cloud/api/storage/11762c64-249d-47fd-9849-76b63c710c3e"
+RUN wget --progress=dot:giga -O '/comfyui/input/Indian_male_model_1.png' "https://cool-anteater-319.convex.cloud/api/storage/15b9c074-9b07-45bc-a944-e5483ff604f2"
+RUN wget --progress=dot:giga -O '/comfyui/input/pexels-mimfathi-10919291.jpg' "https://cool-anteater-319.convex.cloud/api/storage/13fc3c53-76d0-4bb6-89e8-8e1eab5ccb6a"
+
+# =====================================================================
+# ADDED FOR LOG VERBOSITY AND DYNAMIC ENTRYPOINT ROUTING
+# =====================================================================
+
+# 1. Force Python to dump console output instantly instead of caching/buffering it
+ENV PYTHONUNBUFFERED=1
+
+# 2. Start ComfyUI and dynamically locate and execute your handler file
+CMD ["bash", "-c", "python3 /comfyui/main.py --listen 127.0.0.1 --port 8188 & python3 $(find / -maxdepth 2 -name '*handler.py' | head -n 1)"]
